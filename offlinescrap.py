@@ -168,6 +168,7 @@ if 'best_state' in st.session_state:
         st.success(f"**Optimal Route Found!** Finish all {total_rides} rides by **{mins_to_time(best_state[0])}**")
         
                 # --- Map Generation ---
+# --- Map Generation ---
         st.subheader("Interactive Route Map")
         m = folium.Map(location=[22.3125, 114.0435], zoom_start=16, tiles="CartoDB positron")
         
@@ -178,7 +179,7 @@ if 'best_state' in st.session_state:
         for i, loc in enumerate(best_state[2]):
             base_lat, base_lon = LAND_COORDS[loc]
             
-            # Add a slight "jitter" so multiple visits to the same land don't hide each other
+            # Add a slight "jitter" so multiple visits to the same land don't overlap completely
             if i == 0:
                 j_lat, j_lon = base_lat, base_lon
             else:
@@ -187,18 +188,39 @@ if 'best_state' in st.session_state:
                 
             path_coords.append([j_lat, j_lon])
             
-            # Add numbered tooltips so you know the exact order!
-            tooltip_text = f"Start: {loc}" if i == 0 else f"Step {i}: {loc}"
-            color = "red" if i == 0 else "blue"
-            icon_type = "play" if i == 0 else "info-sign"
+            # Text label string
+            label_text = f"Start: {loc}" if i == 0 else f"{i}. {loc}"
+            bg_color = "#d9534f" if i == 0 else "#0275d8"
             
+            # Custom HTML icon to display static text always on screen
+            custom_icon = folium.DivIcon(
+                icon_size=(150, 36),
+                icon_anchor=(0, 0),
+                html=f'''
+                    <div style="
+                        font-size: 11px; 
+                        font-weight: bold; 
+                        color: white; 
+                        background-color: {bg_color}; 
+                        border: 1px solid white;
+                        border-radius: 4px; 
+                        padding: 3px 7px; 
+                        box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+                        white-space: nowrap;
+                        display: inline-block;
+                    ">
+                        {label_text}
+                    </div>
+                '''
+            )
+            
+            # Place the static label marker on the map
             folium.Marker(
-                location=[j_lat, j_lon], 
-                tooltip=tooltip_text, 
-                icon=folium.Icon(color=color, icon=icon_type)
+                location=[j_lat, j_lon],
+                icon=custom_icon
             ).add_to(m)
         
-        # Use AntPath for animated directional arrows!
+        # Animated directional path between points
         plugins.AntPath(
             locations=path_coords, 
             dash_array=[10, 20],
@@ -209,7 +231,7 @@ if 'best_state' in st.session_state:
             opacity=0.8
         ).add_to(m)
         
-        # returned_objects=[] stops the map from causing reruns when you interact with it!
+        # Render map in Streamlit
         st_folium(m, width=700, height=400, returned_objects=[])
 
 
