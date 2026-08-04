@@ -77,8 +77,8 @@ def get_wait_time(df, ride, current_mins):
 # --- Main App UI ---
 st.set_page_config(page_title="HKDL Route AI", layout="centered")
 
-st.title("HKDL Route Optimizer")
-st.markdown("Plan your perfect Disney day using historical queue data and advanced pathfinding AI.")
+st.title("Hong Kong Disneyland Route Optimizer")
+st.markdown("Plan your perfect Disney day using historical queue data based on June 15, 2026 (Monday) and advanced pathfinding AI.")
 
 df = load_data()
 if df is None:
