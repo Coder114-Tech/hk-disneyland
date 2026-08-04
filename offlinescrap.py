@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 import folium
 from streamlit_folium import st_folium
-import sys
+import heapq
+import random
+from folium import plugins
 
 # --- Configuration & Park Layout ---
 CSV_FILE = "hkdl_june15_timeline.csv"
@@ -58,16 +60,17 @@ def load_data():
     try:
         df = pd.read_csv(CSV_FILE, dtype=str)
         df.set_index("Time", inplace=True)
-        return df
+        # Convert DataFrame to dictionary for ultra-fast O(1) memory lookups
+        return df.to_dict()
     except FileNotFoundError:
         return None
 
-def get_wait_time(df, ride, current_mins):
+def get_wait_time(data_dict, ride, current_mins):
     time_str = mins_to_time(current_mins)
-    if time_str not in df.index:
-        time_str = "10:00" if current_mins < time_to_mins("10:00") else "20:30"
-    wait = df.at[time_str, ride]
-    if pd.isna(wait) or str(wait).strip() == "" or wait == "nan":
+    ride_data = data_dict.get(ride, {})
+    wait = ride_data.get(time_str, None)
+    
+    if wait is None or str(wait).strip() in ("", "nan"):
         return 5
     try:
         return int(float(wait))
@@ -77,11 +80,11 @@ def get_wait_time(df, ride, current_mins):
 # --- Main App UI ---
 st.set_page_config(page_title="HKDL Route AI", layout="centered")
 
-st.title("Hong Kong Disneyland Route Optimizer")
-st.markdown("Plan your perfect Disney day using historical queue data based on June 15, 2026 (Monday) and advanced pathfinding AI.")
+st.title("HKDL Route Optimizer")
+st.markdown("Plan your perfect Disney day using historical queue data and advanced pathfinding AI.")
 
-df = load_data()
-if df is None:
+data_dict = load_data()
+if data_dict is None:
     st.error(f"Could not find `{CSV_FILE}`. Please ensure it is in the same folder.")
     st.stop()
 
@@ -102,62 +105,74 @@ if st.button("Calculate Fastest Route", type="primary", use_container_width=True
     if not target_rides:
         st.warning("Please select at least one ride!")
     else:
-        with st.spinner(f"Simulating millions of routes for {len(target_rides)} rides..."):
+        with st.spinner("Finding optimal route in milliseconds..."):
             
-            best_state = [float('inf'), [], []] 
+            # Index duplicate ride instances
+            indexed_rides = []
+            ride_counts = {}
+            for ride in target_rides:
+                c = ride_counts.get(ride, 0)
+                indexed_rides.append((ride, c))
+                ride_counts[ride] = c + 1
             
-            def solve(curr_loc, curr_time, remaining_rides, current_log, loc_path):
-                if curr_time + (len(remaining_rides) * RIDE_DURATION) >= best_state[0]:
-                    return
-                
-                if not remaining_rides:
-                    best_state[0] = curr_time
-                    best_state[1] = list(current_log)
-                    best_state[2] = list(loc_path)
-                    return
-                
-                choices = []
-                for ride in set(remaining_rides):
-                    land = RIDE_LOCATIONS[ride]
+            num_rides = len(indexed_rides)
+            ALL_VISITED_MASK = (1 << num_rides) - 1
+
+            start_time = time_to_mins("10:00")
+            # Heap Queue format: (current_time, curr_loc, visited_mask, step_logs, location_path)
+            pq = [(start_time, "Entrance", 0, [], ["Entrance"])]
+            best_visited = {}
+            optimal_result = None
+
+            # --- Ultra-Fast Dijkstra Algorithm ---
+            while pq:
+                curr_time, curr_loc, mask, current_log, loc_path = heapq.heappop(pq)
+
+                # First time reaching ALL_VISITED_MASK is guaranteed to be optimal
+                if mask == ALL_VISITED_MASK:
+                    optimal_result = [curr_time, current_log, loc_path]
+                    break
+
+                state_key = (curr_loc, mask)
+                if state_key in best_visited and best_visited[state_key] <= curr_time:
+                    continue
+                best_visited[state_key] = curr_time
+
+                tried_names = set()
+                for idx, (ride_name, copy_id) in enumerate(indexed_rides):
+                    if mask & (1 << idx):
+                        continue
+                    
+                    # Avoid branching on identical rides at the same decision node
+                    if ride_name in tried_names:
+                        continue
+                    tried_names.add(ride_name)
+
+                    land = RIDE_LOCATIONS[ride_name]
                     walk = WALK_MATRIX[curr_loc][land]
                     arr_time = curr_time + walk
-                    wait_open = max(0, delayed_open_mins - arr_time) if ride in DELAYED_RIDES else 0
-                    actual_arr = arr_time + wait_open
-                    q_wait = get_wait_time(df, ride, actual_arr)
-                    finish = actual_arr + q_wait + RIDE_DURATION
-                    choices.append((finish, ride, walk, wait_open, q_wait, actual_arr, land))
-                
-                choices.sort(key=lambda x: x[0])
-                
-                for finish, ride, walk, wait_open, q_wait, actual_arr, land in choices:
-                    next_remaining = list(remaining_rides)
-                    next_remaining.remove(ride)
                     
+                    wait_open = max(0, delayed_open_mins - arr_time) if ride_name in DELAYED_RIDES else 0
+                    actual_arr = arr_time + wait_open
+                    q_wait = get_wait_time(data_dict, ride_name, actual_arr)
+                    finish = actual_arr + q_wait + RIDE_DURATION
+
                     step_log = {
                         "Time": mins_to_time(actual_arr),
-                        "Action / Ride": ("Wait: " if wait_open > 0 else "") + ride.split(" -")[0],
+                        "Action / Ride": ("Wait: " if wait_open > 0 else "") + ride_name.split(" -")[0],
                         "Walk": f"{walk}m",
                         "Queue": f"{q_wait}m"
                     }
-                    
-                    current_log.append(step_log)
-                    loc_path.append(land)
-                    
-                    solve(land, finish, next_remaining, current_log, loc_path)
-                    
-                    current_log.pop()
-                    loc_path.pop()
 
-            # Start Algorithm
-            solve("Entrance", time_to_mins("10:00"), target_rides, [], ["Entrance"])
+                    next_mask = mask | (1 << idx)
+                    heapq.heappush(pq, (finish, land, next_mask, current_log + [step_log], loc_path + [land]))
 
-            # 🧠 SAVE TO MEMORY
-            st.session_state['best_state'] = best_state
+            # Save results to session
+            st.session_state['best_state'] = optimal_result if optimal_result else [float('inf'), [], []]
             st.session_state['total_rides'] = len(target_rides)
 
 
 # --- Persistent Display Block ---
-# This runs regardless of the button state, as long as memory exists!
 if 'best_state' in st.session_state:
     best_state = st.session_state['best_state']
     total_rides = st.session_state['total_rides']
@@ -167,19 +182,14 @@ if 'best_state' in st.session_state:
     else:
         st.success(f"**Optimal Route Found!** Finish all {total_rides} rides by **{mins_to_time(best_state[0])}**")
         
-                # --- Map Generation ---
-# --- Map Generation ---
+        # --- Map Generation ---
         st.subheader("Interactive Route Map")
         m = folium.Map(location=[22.3125, 114.0435], zoom_start=16, tiles="CartoDB positron")
-        
-        import random
-        from folium import plugins
         
         path_coords = []
         for i, loc in enumerate(best_state[2]):
             base_lat, base_lon = LAND_COORDS[loc]
             
-            # Add a slight "jitter" so multiple visits to the same land don't overlap completely
             if i == 0:
                 j_lat, j_lon = base_lat, base_lon
             else:
@@ -188,11 +198,10 @@ if 'best_state' in st.session_state:
                 
             path_coords.append([j_lat, j_lon])
             
-            # Text label string
+            # Custom html badge labels that stay open permanently
             label_text = f"Start: {loc}" if i == 0 else f"{i}. {loc}"
             bg_color = "#d9534f" if i == 0 else "#0275d8"
             
-            # Custom HTML icon to display static text always on screen
             custom_icon = folium.DivIcon(
                 icon_size=(150, 36),
                 icon_anchor=(0, 0),
@@ -214,13 +223,11 @@ if 'best_state' in st.session_state:
                 '''
             )
             
-            # Place the static label marker on the map
             folium.Marker(
                 location=[j_lat, j_lon],
                 icon=custom_icon
             ).add_to(m)
         
-        # Animated directional path between points
         plugins.AntPath(
             locations=path_coords, 
             dash_array=[10, 20],
@@ -231,9 +238,7 @@ if 'best_state' in st.session_state:
             opacity=0.8
         ).add_to(m)
         
-        # Render map in Streamlit
         st_folium(m, width=700, height=400, returned_objects=[])
-
 
         # --- Table Generation ---
         st.subheader("Itinerary")
