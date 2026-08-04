@@ -75,9 +75,9 @@ def get_wait_time(df, ride, current_mins):
         return 5 
 
 # --- Main App UI ---
-st.set_page_config(page_title="HKDL Route AI", page_icon="🎢", layout="centered")
+st.set_page_config(page_title="HKDL Route AI", layout="centered")
 
-st.title("🎢 HKDL Route Optimizer")
+st.title("HKDL Route Optimizer")
 st.markdown("Plan your perfect Disney day using historical queue data and advanced pathfinding AI.")
 
 df = load_data()
@@ -85,7 +85,7 @@ if df is None:
     st.error(f"Could not find `{CSV_FILE}`. Please ensure it is in the same folder.")
     st.stop()
 
-with st.expander("⚙️ Advanced Settings", expanded=False):
+with st.expander("Advanced Settings", expanded=False):
     choice = st.radio("Back of Park Opening Time:", ["10:30 AM", "11:00 AM"])
     delayed_open_mins = time_to_mins("10:30") if choice == "10:30 AM" else time_to_mins("11:00 AM")
 
@@ -98,7 +98,7 @@ for i, ride in enumerate(RIDE_LOCATIONS.keys()):
         count = st.number_input(ride.split(" -")[0], min_value=0, max_value=5, value=1, step=1, key=ride)
         target_rides.extend([ride] * count)
 
-if st.button("🚀 Calculate Fastest Route", type="primary", use_container_width=True):
+if st.button("Calculate Fastest Route", type="primary", use_container_width=True):
     if not target_rides:
         st.warning("Please select at least one ride!")
     else:
@@ -135,7 +135,7 @@ if st.button("🚀 Calculate Fastest Route", type="primary", use_container_width
                     
                     step_log = {
                         "Time": mins_to_time(actual_arr),
-                        "Action / Ride": ("🛑 Wait: " if wait_open > 0 else "") + ride.split(" -")[0],
+                        "Action / Ride": ("Wait: " if wait_open > 0 else "") + ride.split(" -")[0],
                         "Walk": f"{walk}m",
                         "Queue": f"{q_wait}m"
                     }
@@ -165,10 +165,10 @@ if 'best_state' in st.session_state:
     if best_state[0] == float('inf'):
         st.error("Could not calculate a route.")
     else:
-        st.success(f"🎉 **Optimal Route Found!** Finish all {total_rides} rides by **{mins_to_time(best_state[0])}**")
+        st.success(f"**Optimal Route Found!** Finish all {total_rides} rides by **{mins_to_time(best_state[0])}**")
         
                 # --- Map Generation ---
-        st.subheader("🗺️ Interactive Route Map")
+        st.subheader("Interactive Route Map")
         m = folium.Map(location=[22.3125, 114.0435], zoom_start=16, tiles="CartoDB positron")
         
         import random
@@ -214,6 +214,6 @@ if 'best_state' in st.session_state:
 
 
         # --- Table Generation ---
-        st.subheader("📋 Itinerary")
+        st.subheader("Itinerary")
         st.table(best_state[1])
         st.caption(f"Assumes 10:00 AM entry & {RIDE_DURATION} min duration per ride.")
